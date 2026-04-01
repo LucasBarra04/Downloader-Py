@@ -1,120 +1,225 @@
 import customtkinter as ctk
 from tkinter import messagebox, filedialog
 import threading
-from pytubefix import YouTube
-from PIL import Image, ImageTk
 import requests
 from io import BytesIO
+from PIL import Image
+from pytubefix import YouTube
+import os
+import subprocess
 
-ctk.set_appearance_mode("System")
-ctk.set_default_color_theme("blue") 
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
 
-class App(ctk.CTk):
+class YouTubeDownloaderApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Baixador de Vídeos Pro")
-        self.geometry("800x650")
-        self.grid_columnconfigure(0, weight=1)
-
-        self.yt = None
-        self.stream_download = None 
-        self.thumbnail_tk = None
-
-        self.label_titulo = ctk.CTkLabel(self, text="Cole o Link do YouTube", font=("Arial", 22, "bold"))
-        self.label_titulo.pack(pady=(30, 10))
-        self.entrada_url = ctk.CTkEntry(self, width=600, height=40, placeholder_text="Ex: https://www.youtube.com/watch?v=...")
-        self.entrada_url.pack(pady=10)
-
-        self.botao_buscar = ctk.CTkButton(self, text="Buscar Informações", command=self.iniciar_busca, font=("Arial", 14, "bold"), height=40)
-        self.botao_buscar.pack(pady=(10, 20))
-
-        self.frame_info = ctk.CTkFrame(self, fg_color="transparent")
-    
-        self.label_thumbnail = ctk.CTkLabel(self.frame_info, text="")
-        self.label_thumbnail.pack(pady=10)
-
-        self.label_dados = ctk.CTkLabel(self.frame_info, text="", font=("Arial", 14), justify="center")
-        self.label_dados.pack(pady=5)
-
-        self.botao_baixar = ctk.CTkButton(self.frame_info, text="Escolher Pasta e Baixar", command=self.iniciar_download, font=("Arial", 14, "bold"), height=40, fg_color="#ff0000", hover_color="#cc0000")
-        self.botao_baixar.pack(pady=(15, 10))
+        self.title("Youtube Downloader")
+        self.geometry("750x450")
+        self.resizable(False, False)
         
-        self.label_status = ctk.CTkLabel(self.frame_info, text="", font=("Arial", 12))
-        self.label_status.pack()
+        self.yt = None
+        self.imagem_tk = None
+
+        self.construir_interface()
+
+    def construir_interface(self):
+        self.frame_busca = ctk.CTkFrame(self, fg_color="transparent")
+        self.frame_busca.pack(pady=(30, 20), padx=20, fill="x")
+
+        self.entrada_url = ctk.CTkEntry(
+            self.frame_busca, 
+            placeholder_text="Cole o link do vídeo aqui...", 
+            width=500, 
+            height=45, 
+            font=("Segoe UI", 14)
+        )
+        self.entrada_url.pack(side="left", padx=(0, 10))
+
+        self.botao_buscar = ctk.CTkButton(
+            self.frame_busca, 
+            text="Buscar", 
+            command=self.iniciar_busca, 
+            width=120, 
+            height=45, 
+            font=("Segoe UI", 14, "bold")
+        )
+        self.botao_buscar.pack(side="left")
+
+        self.frame_card = ctk.CTkFrame(self, corner_radius=15)
+        
+        self.frame_card.grid_columnconfigure(0, weight=0)
+        self.frame_card.grid_columnconfigure(1, weight=1)
+        
+        self.label_thumb = ctk.CTkLabel(self.frame_card, text="", corner_radius=10)
+        self.label_thumb.grid(row=0, column=0, rowspan=6, padx=20, pady=20)
+
+        self.label_titulo = ctk.CTkLabel(
+            self.frame_card, 
+            text="", 
+            font=("Segoe UI", 16, "bold"), 
+            wraplength=300, 
+            justify="left",
+            anchor="w"
+        )
+        self.label_titulo.grid(row=0, column=1, sticky="nw", pady=(20, 0), padx=(0, 20))
+
+        self.label_autor = ctk.CTkLabel(
+            self.frame_card, 
+            text="", 
+            font=("Segoe UI", 13), 
+            text_color="gray70",
+            anchor="w"
+        )
+        self.label_autor.grid(row=1, column=1, sticky="nw", pady=(0, 15), padx=(0, 20))
+
+        self.frame_progresso = ctk.CTkFrame(self.frame_card, fg_color="transparent")
+        
+        self.barra_progresso = ctk.CTkProgressBar(self.frame_progresso, width=250, height=10)
+        self.barra_progresso.set(0)
+        self.barra_progresso.pack(side="left", pady=5)
+        
+        self.label_porcentagem = ctk.CTkLabel(self.frame_progresso, text="0%", font=("Segoe UI", 12))
+        self.label_porcentagem.pack(side="left", padx=10)
+
+        self.label_status = ctk.CTkLabel(self.frame_card, text="", font=("Segoe UI", 12))
+        self.label_status.grid(row=3, column=1, sticky="sw", padx=(0, 20))
+
+        self.frame_controles = ctk.CTkFrame(self.frame_card, fg_color="transparent")
+        self.frame_controles.grid(row=4, column=1, sticky="sw", pady=(0, 20), padx=(0, 20))
+
+        self.combo_resolucao = ctk.CTkOptionMenu(
+            self.frame_controles,
+            values=["Buscando..."],
+            width=100,
+            height=40,
+            font=("Segoe UI", 13)
+        )
+        self.combo_resolucao.pack(side="left", padx=(0, 10))
+
+        self.botao_baixar = ctk.CTkButton(
+            self.frame_controles, 
+            text="Baixar Vídeo", 
+            command=self.iniciar_download, 
+            fg_color="#E50914",
+            hover_color="#B80710",
+            height=40,
+            font=("Segoe UI", 14, "bold")
+        )
+        self.botao_baixar.pack(side="left")
 
     def iniciar_busca(self):
         url = self.entrada_url.get()
         if not url:
-            messagebox.showwarning("Aviso", "Por favor, insira uma URL válida.")
             return
 
-        self.label_dados.configure(text="")
-        self.label_thumbnail.configure(image=None)
-        self.label_status.configure(text="", fg_color="transparent")
-        self.frame_info.pack(fill="x", padx=50)
-        self.botao_baixar.configure(state="disabled")
-
-        self.label_status.configure(text="Buscando thumbnail e informações...", text_color="cyan")
+        self.botao_buscar.configure(state="disabled")
+        self.frame_card.pack_forget()
         
-        thread_busca = threading.Thread(target=self.buscar_dados_video, args=(url,))
-        thread_busca.start()
+        threading.Thread(target=self.processar_busca, args=(url,)).start()
 
-    def buscar_dados_video(self, url):
+    def processar_busca(self, url):
         try:
-            self.yt = YouTube(url)
+            self.yt = YouTube(url, on_progress_callback=self.atualizar_progresso)
             
             resposta = requests.get(self.yt.thumbnail_url)
-            imagem_data = BytesIO(resposta.content)
-            imagem_pil = Image.open(imagem_data)
+            img_data = Image.open(BytesIO(resposta.content))
             
-            proporcao = 480 / imagem_pil.width
-            nova_altura = int(imagem_pil.height * proporcao)
-            imagem_pil_redimensionada = imagem_pil.resize((480, nova_altura), Image.Resampling.LANCZOS)
+            img_data = img_data.resize((280, 157), Image.Resampling.LANCZOS)
+            self.imagem_tk = ctk.CTkImage(light_image=img_data, dark_image=img_data, size=(280, 157))
             
-            self.thumbnail_tk = ImageTk.PhotoImage(imagem_pil_redimensionada)
+            self.label_thumb.configure(image=self.imagem_tk)
+            self.label_titulo.configure(text=self.yt.title)
+            self.label_autor.configure(text=self.yt.author)
+            
+            streams = self.yt.streams.filter(type="video")
+            resolucoes = list(set([s.resolution for s in streams if s.resolution]))
+            resolucoes.sort(key=lambda x: int(x.replace("p", "")), reverse=True)
+            
+            if not resolucoes:
+                resolucoes = ["Padrão"]
 
-            self.label_thumbnail.configure(image=self.thumbnail_tk)
-            dados_texto = f"Título: {self.yt.title}\nAutor: {self.yt.author}"
-            self.label_dados.configure(text=dados_texto)
-            self.label_status.configure(text="Pronto para baixar!", text_color="green")
+            self.combo_resolucao.configure(values=resolucoes)
+            self.combo_resolucao.set(resolucoes[0])
             
-            self.stream_download = self.yt.streams.get_highest_resolution()
-            self.botao_baixar.configure(state="normal")
+            self.barra_progresso.set(0)
+            self.label_porcentagem.configure(text="0%")
+            self.frame_progresso.grid_forget()
+            
+            self.label_status.configure(text="Pronto para baixar.", text_color="gray70")
+            self.botao_baixar.configure(state="normal", text="Baixar Vídeo", fg_color="#E50914")
+
+            self.frame_card.pack(pady=10, padx=20, fill="both", expand=True)
 
         except Exception as e:
-            self.label_status.configure(text="❌ Erro ao buscar dados do vídeo.", text_color="red")
-            messagebox.showerror("Erro", f"Ocorreu um erro ao carregar o vídeo:\n{str(e)}")
-            self.frame_info.pack_forget()
+            messagebox.showerror("Erro", "Não foi possível carregar o vídeo. Verifique o link.")
+        finally:
+            self.botao_buscar.configure(state="normal")
 
     def iniciar_download(self):
-        pasta_destino = filedialog.askdirectory(title="Escolha onde salvar o vídeo")
-        
-        if not pasta_destino:
+        pasta = filedialog.askdirectory()
+        if not pasta:
             return
 
-        if self.stream_download:
-            self.label_status.configure(text="Iniciando download... Aguarde.", text_color="orange")
-            self.botao_baixar.configure(state="disabled")
-            
-            # Thread para o download pesado
-            thread_download = threading.Thread(target=self.fazer_download, args=(pasta_destino,))
-            thread_download.start()
+        self.botao_baixar.configure(state="disabled")
+        self.combo_resolucao.configure(state="disabled")
+        self.frame_progresso.grid(row=2, column=1, sticky="w", pady=(10, 5), padx=(0, 20))
+        self.label_status.configure(text="Baixando...", text_color="#E50914")
 
-    def fazer_download(self, pasta_destino):
+        threading.Thread(target=self.processar_download, args=(pasta,)).start()
+
+    def processar_download(self, pasta):
         try:
-            self.stream_download.download(output_path=pasta_destino)
-            self.label_status.configure(text=f"✅ Download concluído com sucesso!", text_color="green")
-            messagebox.showinfo("Sucesso", f"O vídeo foi salvo em:\n{pasta_destino}")
+            res_escolhida = self.combo_resolucao.get()
+            
+            if res_escolhida == "Padrão":
+                stream = self.yt.streams.get_highest_resolution()
+                stream.download(output_path=pasta)
+            else:
+                stream_video = self.yt.streams.filter(res=res_escolhida, type="video").first()
+                
+                if stream_video.is_progressive:
+                    stream_video.download(output_path=pasta)
+                else:
+                    self.label_status.configure(text="Baixando vídeo e áudio...", text_color="#E50914")
+                    stream_audio = self.yt.streams.get_audio_only()
+                    
+                    video_path = stream_video.download(output_path=pasta, filename="temp_video.mp4")
+                    audio_path = stream_audio.download(output_path=pasta, filename="temp_audio.mp4")
+                    
+                    self.label_status.configure(text="Processando 1080p (Pode demorar)...", text_color="orange")
+                    
+                    nome_seguro = "".join([c for c in self.yt.title if c.isalpha() or c.isdigit() or c==' ']).rstrip()
+                    caminho_final = os.path.join(pasta, f"{nome_seguro}.mp4")
+                    
+                    comando = f'ffmpeg -y -i "{video_path}" -i "{audio_path}" -c:v copy -c:a aac "{caminho_final}"'
+                    subprocess.run(comando, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    
+                    if os.path.exists(caminho_final):
+                        os.remove(video_path)
+                        os.remove(audio_path)
+                    else:
+                        raise Exception("FFmpeg não encontrado. Instale o FFmpeg para baixar em 1080p.")
+
+            self.label_status.configure(text="✅ Download Completo!", text_color="#28a745")
+            self.botao_baixar.configure(text="Sucesso!", fg_color="#28a745")
             
         except Exception as e:
-            self.label_status.configure(text="❌ Erro durante o download.", text_color="red")
-            messagebox.showerror("Erro", f"Ocorreu um erro durante o download:\n{str(e)}")
-            
+            self.label_status.configure(text="❌ Erro no download.", text_color="red")
+            messagebox.showerror("Erro", str(e))
         finally:
             self.botao_baixar.configure(state="normal")
+            self.combo_resolucao.configure(state="normal")
+
+    def atualizar_progresso(self, stream, chunk, bytes_remaining):
+        tamanho_total = stream.filesize
+        bytes_baixados = tamanho_total - bytes_remaining
+        porcentagem = bytes_baixados / tamanho_total
+        
+        self.barra_progresso.set(porcentagem)
+        self.label_porcentagem.configure(text=f"{int(porcentagem * 100)}%")
 
 if __name__ == "__main__":
-    app = App()
-    app.eval('tk::PlaceWindow . center')
+    app = YouTubeDownloaderApp()
     app.mainloop()
